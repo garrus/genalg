@@ -1,9 +1,8 @@
 <?php
-require __DIR__. '/lib/GeneticAlgorithm.php';
 
-$_CONFIG = require 'config.php';
-
-
+/**
+ * Class StationManager
+ */
 class StationManager extends Gene {
 
 	public $plan;
@@ -86,13 +85,13 @@ class StationManager extends Gene {
 	public function simulate(){
 
 		$plan = $this->plan;
-		$gold = self::$gameConfig['startGold'];
+		$metal = self::$gameConfig['startMetal'];
 		$level = [];
 		foreach (self::$typeMap as $type) {
 			$level[$type] = 0;
 		}
 
-		$goldProduct = $this->calcGoldProduct($level);
+		$metalProduct = $this->calcMetalProduct($level);
 
 		$timeLeft = self::$gameConfig['time'];
 		$timeWaiting = 0;
@@ -100,12 +99,12 @@ class StationManager extends Gene {
 		$buildingType = null;
 		while ($timeLeft--) {
 
-			$gold += $goldProduct;
+			$metal += $metalProduct;
 
 			if ($buildingTime) {
 				// do fast-forwarding
 				if ($buildingTime < $timeLeft) {
-					$gold += $goldProduct * $buildingTime;
+					$metal += $metalProduct * $buildingTime;
 					$timeLeft -= $buildingTime;
 					$buildingTime = 0;
 				} else {
@@ -116,23 +115,23 @@ class StationManager extends Gene {
 
 			if ($buildingType) {
 				++$level[$buildingType];
-				$goldProduct = $this->calcGoldProduct($level);
+				$metalProduct = $this->calcMetalProduct($level);
 				$buildingType = null;
 			}
 
 			if (strlen($plan) != 0) {
 				//echo $_CONFIG['game.time'] - $timeLeft, ' :: Try building '. $plan[0], PHP_EOL;
-				$info = $this->tryBuild($plan[0], $gold, $level);
+				$info = $this->tryBuild($plan[0], $metal, $level);
 
 				if ($info['techLocked']) {
 					break;
 				}
 
-				if ($info['goldShortage']) {
+				if ($info['metalShortage']) {
 					// do fast-forwarding
-					$timeNeeded = floor($info['goldShortage'] / $goldProduct);
+					$timeNeeded = floor($info['metalShortage'] / $metalProduct);
 					if ($timeNeeded < $timeLeft) {
-						$gold += $goldProduct * $timeNeeded;
+						$metal += $metalProduct * $timeNeeded;
 						$timeLeft -= $timeNeeded;
 						$timeWaiting += $timeNeeded;
 					} else {
@@ -140,19 +139,19 @@ class StationManager extends Gene {
 					}
 				}
 
-				$gold -= $info['cost'];
+				$metal -= $info['cost'];
 				$buildingType = $info['type'];
 				$buildingTime = $info['buildingTime'];
 				$plan = substr($plan, 1);
 			}
 		}
 
-		$gold += $goldProduct * $timeLeft;
-		$this->info = compact('gold', 'level', 'buildingTime', 'buildingType', 'timeWaiting', 'goldProduct');
+		$metal += $metalProduct * $timeLeft;
+		$this->info = compact('metal', 'level', 'buildingTime', 'buildingType', 'timeWaiting', 'metalProduct');
 	}
 
 
-	private function tryBuild($type, $gold, $level){
+	private function tryBuild($type, $metal, $level){
 		$type = self::$typeMap[$type];
 		$techLocked = false;
 		$cost = ceil(call_user_func(self::$gameConfig["building.$type.cost.metal"], $level[$type]+1));
@@ -169,14 +168,14 @@ class StationManager extends Gene {
 			'type' => $type,
 			'techLocked' => $techLocked,
 			'cost' => $cost,
-			'goldShortage' => $cost > $gold ? $cost - $gold : 0,
+			'metalShortage' => $cost > $metal ? $cost - $metal : 0,
 			'buildingTime' => ceil(pow(0.5, $level['nano']) * $cost / self::$gameConfig['buildRate'] / (1 + $level['robot'])),
 		];
 
 	}
 
-	private function calcGoldProduct($level){
-		$baseProduct = self::$gameConfig['baseGoldProduct'];
+	private function calcMetalProduct($level){
+		$baseProduct = self::$gameConfig['baseMetalProduct'];
 
 		if ($level['metalMine'] * $level['solar'] == 0) return $baseProduct;
 
@@ -203,20 +202,20 @@ class StationManager extends Gene {
 		}
 		$consumeScore = $cost / 1000;
 
-		$remainGold = $info['gold'];
+		$remainMetal = $info['metal'];
 		// 尚有建造中的建筑,应该退还其消耗,并按剩余得分来计算
 		if ($info['buildingTime']) {
 			$type = $info['buildingType'];
-			$remainGold += call_user_func(self::$gameConfig["building.$type.cost.metal"], $info['level'][$type] + 1);
+			$remainMetal += call_user_func(self::$gameConfig["building.$type.cost.metal"], $info['level'][$type] + 1);
 		}
-		$goldScore = pow($remainGold, 1/3);
+		$metalScore = pow($remainMetal, 1/3);
 
 		// 金币产量得分
-		$productScore = $info['goldProduct'];
+		$productScore = sqrt($info['metalProduct']);
 
 		$this->scoreDetail = [
-			'total' => floor($consumeScore + $productScore + $goldScore),
-			'gold' => $goldScore,
+			'total' => floor($consumeScore + $productScore + $metalScore),
+			'metal' => $metalScore,
 			'consume' => $consumeScore,
 			'product' => $productScore,
 		];
@@ -250,69 +249,4 @@ class StationManager extends Gene {
 	public function __toString(){
 		return substr_replace($this->plan, '...', 10, -3);
 	}
-}
-
-
-
-$genes = [];
-for ($i = 0; $i < $_CONFIG['sys.seeds']; $i++) {
-	$genes[] = new StationManager($_CONFIG['sys.seedLength'], $_CONFIG['sys.mutantRange']);
-}
-$maxScore = 50000;
-$gameConfig = [];
-foreach ($_CONFIG as $key => $val) {
-	if (strpos($key, 'game.') === 0) {
-		$gameConfig[substr($key, 5)] = $val;
-	}
-}
-StationManager::$gameConfig = $gameConfig;
-
-list($manager, $score) = GeneticAlgorithm::run([
-	'genes' => $genes,
-	'generations' => $_CONFIG['sys.generations'],
-	'mutateProbability' => $_CONFIG['sys.mutantPtg'],
-	'exchangeProability' => $_CONFIG['sys.exchangePtg'],
-]);
-
-print_r($manager->info);
-print_r($manager->scoreDetail);
-
-
-function recordPlan($gen, $score, $plan, $detail){
-	global $_CONFIG;
-
-	$detail['energy'] = [
-		'consume' => call_user_func($_CONFIG['game.metalMine.consume'], $detail['level']['metalMine']),
-		'product' => call_user_func($_CONFIG['game.solar.product.energy'], $detail['level']['solar']),
-	];
-
-	$file = fopen(__DIR__. DIRECTORY_SEPARATOR. 'plans'. DIRECTORY_SEPARATOR. $score['total']. '.txt', 'a+');
-	fwrite($file, var_export([
-			'generation' => $gen,
-			'plan' => $plan,
-			'detail' => $detail,
-			'score' => $score,
-		], true). PHP_EOL);
-	fwrite($file, ' ================================= '. PHP_EOL. PHP_EOL);
-	fclose($file);
-}
-
-function _log($cate, $timeLeft, $gold, $level, $buildType, $buildingTime=0){
-    global $_CONFIG;
-    switch ($cate) {
-        case 'building-start':
-            printf('%4d :: Start building %s. Will using time %d. << %d',
-                $_CONFIG['game.time'] - $timeLeft, $buildType, $buildingTime, $gold);
-            break;
-        case 'building-end':
-            printf('%4d :: End building %s. << $%d',
-                $_CONFIG['game.time'] - $timeLeft, $buildType, $gold);
-            break;
-    }
-
-    foreach ($level as $type => $lvl) {
-        echo ", $type: $lvl";
-    }
-
-    echo PHP_EOL;
 }
