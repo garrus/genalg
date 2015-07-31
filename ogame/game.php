@@ -16,71 +16,71 @@ return [
 
 	// metal mine
 	'building.metalMine.cost.metal' => function($level){
-		return 60 * $level * pow($level - 1, 1.5);
+		return 60 * $level * pow(1.5, $level - 1);
 	},
 	'building.metalMine.cost.crystal' => function($level){
-		return 15 * $level * pow($level - 1, 1.5);
+		return 15 * $level * pow(1.5, $level - 1);
 	},
 	'building.metalMine.product.metal' => function($level){
-		return 90 * $level * pow($level - 1, 1.1);
+		return 90 * $level * pow(1.1, $level - 1);
 	},
 	'building.metalMine.consume' => function($level){
-		return 10 * $level * pow($level - 1, 1.1);
+		return 10 * $level * pow(1.1, $level - 1);
 	},
 
 	// crystal mine
 	'building.crystalMine.cost.metal' => function($level){
-		return 45 * $level * pow($level - 1, 1.5);
+		return 45 * $level * pow(1.5, $level - 1, 1.5);
 	},
 	'building.crystalMine.cost.crystal' => function($level){
-		return 24 * $level * pow($level - 1, 1.5);
+		return 24 * $level * pow(1.5, $level - 1, 1.5);
 	},
 	'building.crystalMine.product.crystal' => function($level){
-		return 45 * $level * pow($level - 1, 1.1);
+		return 45 * $level * pow(1.1, $level - 1, 1.1);
 	},
 	'building.crystalMine.consume' => function($level){
-		return 12 * $level * pow($level - 1, 1.1);
+		return 12 * $level * pow(1.1, $level - 1, 1.1);
 	},
 
 	// deuterium
 	'building.deuteriumSynthesizer.cost.metal' => function($level){
-		return 45 * $level * pow($level - 1, 1.5);
+		return 45 * $level * pow(1.5, $level - 1, 1.5);
 	},
 	'building.deuteriumSynthesizer.cost.crystal' => function($level){
-		return 24 * $level * pow($level - 1, 1.5);
+		return 24 * $level * pow(1.5, $level - 1, 1.5);
 	},
 	'building.deuteriumSynthesizer.product.deuterium' => function($level){
-		return 15 * $level * pow($level - 1, 1.1);
+		return 15 * $level * pow(1.1, $level - 1, 1.1);
 	},
 	'building.deuteriumSynthesizer.consume' => function($level){
-		return 12 * $level * pow($level - 1, 1.1);
+		return 12 * $level * pow(1.1, $level - 1, 1.1);
 	},
 
 	// solar plant
     'building.solar.cost.metal' => function($level){
-        return 75 * pow($level - 1, 1.6);
+        return 75 * pow(1.6, $level - 1);
     },
 	'building.solar.cost.crystal' => function($level){
-		return 15 * pow($level - 1, 1.6);
+		return 15 * pow(1.6, $level - 1);
 	},
     'building.solar.product.energy' => function($level) {
-        return 20 * $level * pow($level - 1, 1.1);
+        return 20 * $level * pow(1.1, $level - 1);
     },
 
 	// robot
     'building.robot.cost.metal' => function($level){
-        return 100 * pow($level - 1, 2);
+        return 100 * pow(2, $level - 1);
     },
 	'building.robot.cost.crystal' => function($level){
-		return 15 * pow($level - 1, 2);
+		return 15 * pow(2, $level - 1);
 	},
 
 	// nano
     'building.nano.cost.metal' => function($level){
-        return 1000000 * pow($level - 1, 2);
+        return 1000000 * pow(2, $level - 1);
     },
 	'building.nano.cost.crystal' => function($level){
-		return 500000 * pow($level - 1, 2);
+		return 500000 * pow(2, $level - 1);
 	},
 
 ];
