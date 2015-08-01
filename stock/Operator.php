@@ -5,8 +5,8 @@ class Operator extends Gene{
 	public static $tf300=[];
 
 	public static $setting=[
-		'startWorth' => 30000,
-		'startCash' => 70000,
+		'worth' => 30000,
+		'cash' => 70000,
 	];
 
 	private static $_maxScore = 0;
@@ -26,7 +26,7 @@ class Operator extends Gene{
 	 */
 	public $strategy = '';
 
-	public $info = '';
+	public $info = [];
 
 	public function __construct($strategy=null){
 		$this->strategy = $strategy ?: $this->generateStrategy();
@@ -35,14 +35,14 @@ class Operator extends Gene{
 	public function generateStrategy(){
 
 		$s = [];
+		$s[] = mt_rand(1, 1000);
+		$s[] = mt_rand(1, 20);
+		$s[] = mt_rand(1, 1000);
+		$s[] = mt_rand(1, 20);
 		$s[] = mt_rand(1, 10000);
-		$s[] = mt_rand(1, 10);
+		$s[] = mt_rand(1, 50);
 		$s[] = mt_rand(1, 10000);
-		$s[] = mt_rand(1, 10);
-		$s[] = mt_rand(1, 10000);
-		$s[] = mt_rand(1, 10);
-		$s[] = mt_rand(1, 10000);
-		$s[] = mt_rand(1, 10);
+		$s[] = mt_rand(1, 50);
 		return $s;
 	}
 
@@ -88,138 +88,31 @@ class Operator extends Gene{
 	public function mutate(){
 
 		$pos = array_rand($this->strategy);
-		if ($pos % 2 == 0) {
-			$this->strategy[$pos] = mt_rand(1, 10000);
-		} else {
-			$this->strategy[$pos] = mt_rand(1, 10);
+		switch ($pos) {
+			case 0:
+			case 2:
+				$v = mt_rand(1, 1000);
+				break;
+			case 1:
+			case 3:
+				$v = mt_rand(1, 20);
+				break;
+			case 4:
+			case 6:
+				$v = mt_rand(1, 10000);
+				break;
+			case 5:
+			case 7:
+				$v = mt_rand(1, 50);
+				break;
+			default:
+				return;
 		}
+		$this->strategy[$pos] = $v;
 	}
 
 	public function __toString(){
 		return implode('-', $this->strategy);
 	}
-
-}
-
-
-class StockSimulator {
-
-	const BUY_FEE_RATE = 0.006;
-	const SELL_FEE_RATE = 0.005;
-
-
-	public static function run($tf300, $setting, $strategy){
-
-		$cash = $setting['startCash'];
-		$worth = $setting['startWorth'];
-
-		list(
-			$BUY_ON_RISE,
-			$BUY_AMOUNT_ON_RISE,
-			$SELL_ON_FALL,
-			$SELL_AMOUNT_ON_FALL,
-			$BUY_ON_RISE_TOTAL,
-			$BUY_AMOUNT_ON_RISE_TOTAL,
-			$SELL_ON_FALL_TOTAL,
-			$SELL_AMOUNT_ON_FALL_TOTAL
-			) = $strategy;
-
-		$yesterdayIndex = array_shift($tf300);
-		$lastOptIndex = $yesterdayIndex;
-
-		$totalFee = 0;
-		$optCount = 0;
-
-		foreach ($tf300 as $todayIndex) {
-			if ($todayIndex == $yesterdayIndex) continue;
-
-			if ($cash < 0 || $worth < 0) {
-				throw new UnexpectedValueException('Unexpected. Cash='. $cash. ', Worth='. $worth);
-			}
-
-			$worth *= ($todayIndex / $yesterdayIndex);
-
-			if ($todayIndex < $lastOptIndex) {
-				$totalFall = round(10000 * ($lastOptIndex - $todayIndex) / $lastOptIndex);
-				if ($totalFall >= $SELL_ON_FALL_TOTAL) {
-					// 抛出
-					$fee = self::doSelling($cash, $worth, $SELL_AMOUNT_ON_FALL_TOTAL * 1000);
-					$lastOptIndex = $todayIndex;
-					if ($fee) {
-						++$optCount;
-						$totalFee += $fee;
-					}
-					continue;
-				}
-			} else {
-				$totalRise = round(10000 * ($todayIndex - $lastOptIndex) / $lastOptIndex);
-				if ($totalRise >= $BUY_ON_RISE_TOTAL) {
-					// 抛出
-					$fee = self::doBuying($cash, $worth, $BUY_AMOUNT_ON_RISE_TOTAL * 1000);
-					$lastOptIndex = $todayIndex;
-					if ($fee) {
-						++$optCount;
-						$totalFee += $fee;
-					}
-					continue;
-				}
-			}
-
-			if ($todayIndex < $yesterdayIndex) {
-				// 跌
-				$fall = round(10000 * ($yesterdayIndex - $todayIndex) / $yesterdayIndex);
-				if ($fall >= $SELL_ON_FALL) {
-					// 抛出
-					$fee = self::doSelling($cash, $worth, $SELL_AMOUNT_ON_FALL * 1000);
-					$lastOptIndex = $todayIndex;
-					if ($fee) {
-						++$optCount;
-						$totalFee += $fee;
-					}
-				}
-			} else {
-				// 涨
-				$rise = round(10000 * ($todayIndex - $yesterdayIndex) / $yesterdayIndex);
-				if ($rise >= $BUY_ON_RISE) {
-					// 抛出
-					$fee = self::doBuying($cash, $worth, $BUY_AMOUNT_ON_RISE * 1000);
-					$lastOptIndex = $todayIndex;
-					if ($fee) {
-						++$optCount;
-						$totalFee += $fee;
-					}
-				}
-			}
-		}
-
-		return compact('cash', 'worth', 'totalFee', 'optCount');
-	}
-
-
-	protected static function doSelling(&$cash, &$worth, $amount){
-
-		$actual = min($worth, $amount);
-		if ($actual < 200) {
-			return 0;
-		}
-
-		$cash += floor($actual * (1 - self::SELL_FEE_RATE));
-		$worth -= $actual;
-		return ceil($actual * self::SELL_FEE_RATE);
-	}
-
-	protected static function doBuying(&$cash, &$worth, $amount){
-
-		$actual = min($cash, $amount);
-		if ($actual < 1000) {
-			return 0;
-		}
-
-		$cash -= $actual;
-		$worth += floor($actual * (1 - self::BUY_FEE_RATE));
-		return ceil($actual * self::BUY_FEE_RATE);
-	}
-
-
 
 }

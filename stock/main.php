@@ -2,6 +2,7 @@
 require dirname(__DIR__) . '/lib/Cache.php';
 require dirname(__DIR__) . '/lib/GeneticAlgorithm.php';
 require __DIR__ . '/Operator.php';
+require __DIR__ . '/StockSimulator.php';
 
 $file = new SplFileObject(__DIR__ . '/tf300', 'r+');
 $file->setFlags(SplFileObject::DROP_NEW_LINE | SplFileObject::READ_AHEAD | SplFileObject::SKIP_EMPTY);
@@ -30,15 +31,21 @@ function main(){
 	$generations = 10000;
 	/* == Config end == */
 
-	$seeds = file(__DIR__ . DIRECTORY_SEPARATOR . 'seeds.txt');
-	$seeds = array_filter($seeds, function ($seed){
-		return !!trim($seed);
-	});
+	$seeds = array_map(function($line) {
+		$tokens = explode(' ', trim($line));
+		if (count($tokens) == 2) {
+			return explode('-', $tokens[1]);
+		} else {
+			return null;
+		}
+	}, @file(__DIR__ . DIRECTORY_SEPARATOR . 'seeds.txt') ?: []);
+	$seeds = array_filter($seeds);
+
 	$pos = count($seeds) ? array_rand($seeds, min($geneCount, count($seeds))) : [];
 	if (!is_array($pos)) $pos = [$pos];
 
 	for ($genes = []; count($genes) < $geneCount;) {
-		$strategy = count($pos) ? explode('-', trim($seeds[array_shift($pos)])) : null;
+		$strategy = count($pos) ? $seeds[array_shift($pos)] : null;
 		if (is_array($strategy) && count($strategy) !== 8) {
 			$strategy = null;
 		}
@@ -83,11 +90,27 @@ function recordPlan(Operator $operator){
 		$strategy[7] * 1000
 	);
 
+	$account = $operator->info['account'];
+	unset($operator->info['account']);
+
+	ob_start();
+	echo PHP_EOL;
+	printf('  指数      涨跌(%%)     现金    基金价值'. PHP_EOL);
+	echo '------------------------------------------ ', PHP_EOL;
+	foreach ($account as $day) {
+		printf(' %.2f    %+.2f     %5d    %5d'. PHP_EOL, ...$day);
+	}
+	echo PHP_EOL;
+	$account = ob_get_clean();
+
+
+
 	$score = $operator->getScore();
 	fwrite($file, var_export([
 			'strategy'   => $operator->strategy,
 			'explain' => $explain,
 			'detail' => $operator->info,
+			'account' => $account,
 			'score'  => $score,
 			'profit' => $score - 100000,
 			'profitPercent' => sprintf('%+.2f%%', $score / 1000 - 100),
@@ -97,9 +120,10 @@ function recordPlan(Operator $operator){
 
 	if ($score > $max) {
 		$file = fopen(__DIR__ . DIRECTORY_SEPARATOR . 'seeds.txt', 'a+');
-		fwrite($file, trim($operator->__toString()) . PHP_EOL);
+		fwrite($file, $score. ' '. trim($operator->__toString()) . PHP_EOL);
 		fclose($file);
 		$max += 0.618 * ($score - $max);
+		$max = floor($max);
 	}
 
 
