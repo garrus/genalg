@@ -68,15 +68,22 @@ class GeneticAlgorithm {
 	public function calculate(){
 		$highest = null;
 		$highScore = 0;
+		$idleRound = 0;
 		for ($i = 0; $i < $this->generations; $i++) {
 			list($gene, $score) = $this->select();
 			printf('Gen:%d   Score: %d   Gene: %s'. PHP_EOL, $i, $score, $gene);
 			if ($score > $highScore) {
 				$highScore = $score;
 				$highest = clone $gene;
+				$idleRound = 0;
+			} elseif ($score === $highScore) {
+				$idleRound < 3 && $idleRound++;
 			}
 			$this->exchange();
 			$this->mutate();
+			for ($j = 0; $j < $idleRound; $j++) {
+				$this->mutate();
+			}
 		}
 
 		return [$highest, $highScore];
@@ -117,6 +124,7 @@ class GeneticAlgorithm {
 		usort($parents, function($a, $b){
 			return $b['score'] - $a['score'];
 		});
+
 		array_pop($parents); // 直接淘汰表现最差的一个
 		$children[] = reset($parents)['gene']; // 表现最好的一个直接被选中
 

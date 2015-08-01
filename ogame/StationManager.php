@@ -14,49 +14,21 @@ class StationManager extends Gene {
 
 	public $scoreDetail;
 
-	public static $typeMap = [
-		0 => 'metalMine',
-		1 => 'solar',
-		2 => 'robot',
-		3 => 'nano',
-	];
-
-	public static $techTree = [
-		'nano' => [
-			'robot' => 10,
-		],
-	];
 
 	public static $gameConfig = [];
 
-	private static $_cache = [];
+
 	private static $_maxScore = 0;
 
-	protected static function getCache($plan){
-		$key = md5($plan);
-		return isset(self::$_cache[$key]) ? self::$_cache[$key] : false;
-	}
 
-	protected static function setCache($plan, $val){
-		$key = md5($plan);
-		self::$_cache[$key] = $val;
-
-		self::$_cache['_keys'][] = $key;
-		if (count(self::$_cache) > 100) {
-			foreach (array_splice(self::$_cache['_keys'], 0, 30) as $key) {
-				unset(self::$_cache[$key]);
-			}
-		}
-	}
-
-	public function __construct($planLength=200, $mutateRange=9){
-		$this->plan = $this->generatePlan($planLength);
+	public function __construct($planLength=200, $mutateRange=9, $plan=null){
+		$this->plan = $plan ?: $this->generatePlan($planLength);
 		$this->mutateRange = $mutateRange;
 	}
 
-	protected function generatePlan(){
-		$typeLength = count(self::$typeMap);
-		for ($i = 0, $s = ''; $i < 300; ++$i) {
+	protected function generatePlan($planLength){
+		$typeLength = count(StationManagerSimulator::$typeMap);
+		for ($i = 0, $s = ''; $i < $planLength; ++$i) {
 			$s .= mt_rand(0, $typeLength - 1);
 		}
 		return $s;
@@ -68,43 +40,142 @@ class StationManager extends Gene {
 	public function exchange(Gene $gene){
 		$myPlan = $this->plan;
 		$otherPlan = $gene->plan;
-		$pos = mt_rand(0, count($otherPlan));
+		$pos = mt_rand(0, strlen($otherPlan) - 1);
 		$gene->plan = substr_replace($otherPlan, substr($myPlan, $pos), $pos);
 		$this->plan = substr_replace($myPlan, substr($otherPlan, $pos), $pos);
 	}
 
 	public function mutate(){
-		$typeLength = count(self::$typeMap);
-
-		for ($i = 0; $i < $this->mutateRange; $i++) {
+		$typeLength = count(StationManagerSimulator::$typeMap);
+		$mutateBits = mt_rand($this->mutateRange / 2, $this->mutateRange);
+		for ($i = 0; $i < $mutateBits; $i++) {
 			$pos = mt_rand(0, strlen($this->plan) - 1);
 			$this->plan[$pos] = mt_rand(0, $typeLength - 1);
 		}
 	}
 
-	public function simulate(){
+	public function getScore(){
 
-		$plan = $this->plan;
-		$metal = self::$gameConfig['startMetal'];
+		$game = self::$gameConfig;
+		$info = $this->info;
+
+		// 每消耗1000金币得1分
+		$cost = 0;
+		foreach (StationManagerSimulator::$typeMap as $type) {
+			$level = $info['level'][$type];
+			while ($level) {
+				$cost += array_sum(call_user_func($game["building.$type.cost"], $level--));
+			}
+		}
+		$consumeScore = $cost / 1000;
+
+		$remainResource = array_sum($info['resource']);
+		// 尚有建造中的建筑,应该退还其消耗,并按剩余得分来计算
+		if ($info['buildingTime']) {
+			$type = $info['buildingType'];
+			$remainResource += array_sum(call_user_func($game["building.$type.cost"], $info['level'][$type] + 1));
+		}
+		$resourceScore = pow($remainResource, 1/3);
+
+		// 产量得分
+		$productScore = array_sum($info['product']) * 3600;
+
+		$this->scoreDetail = [
+			'total' => floor($consumeScore + $productScore + $resourceScore),
+			'resource' => $resourceScore,
+			'consume' => $consumeScore,
+			'product' => $productScore,
+		];
+
+		return $this->scoreDetail['total'];
+	}
+
+	public function selfEvaluate(){
+
+		$score = Cache::get($this->plan);
+		if ($score !== false) return $score;
+
+		$this->info = [];
+		$this->scoreDetail = [];
+
+		$this->info = StationManagerSimulator::run($this->plan);
+		$score = $this->getScore();
+		if ($score == 0) {
+			print_r($this);
+			throw new UnexpectedValueException('Score is 0.');
+		}
+
+		if ($score > self::$_maxScore) {
+			self::$_maxScore = $score;
+			//recordPlan($g, $score, $plan, $info);
+			Cache::set($this->plan, $score);
+		}
+		return $score;
+	}
+
+	public function __toString(){
+		return $this->plan; // substr_replace($this->plan, '...', 10, -3);
+	}
+}
+
+
+class StationManagerSimulator {
+
+	public static $typeMap = [
+		0 => 'metalMine',
+		1 => 'crystalMine',
+		2 => 'deuteriumSynthesizer',
+		3 => 'solar',
+		4 => 'nuclear',
+		5 => 'robot',
+		6 => 'nano',
+	];
+
+	public static $techTree = [
+		'nano' => [
+			'robot' => 10,
+		],
+		'nuclear' => [
+			'deuteriumSynthesizer' => 5,
+		],
+	];
+
+	private static $_instance;
+
+	public $gameConfig;
+
+	private function __construct($gameConfig){
+		$this->gameConfig = $gameConfig;
+	}
+
+	public static function run($plan){
+		if (!self::$_instance) {
+			self::$_instance = new static(StationManager::$gameConfig);
+		}
+		return self::$_instance->runPlan($plan);
+	}
+
+	public function runPlan($plan){
+
 		$level = [];
 		foreach (self::$typeMap as $type) {
 			$level[$type] = 0;
 		}
-
-		$metalProduct = $this->calcMetalProduct($level);
-
-		$timeLeft = self::$gameConfig['time'];
+		$resource = $this->gameConfig['startResource'];
+		$product = $this->gameConfig['baseProduct'];
+		$timeLeft = $this->gameConfig['time'];
 		$timeWaiting = 0;
 		$buildingTime = 0;
 		$buildingType = null;
+
 		while ($timeLeft--) {
 
-			$metal += $metalProduct;
+			$this->doProduce($resource, $product, 1);
 
 			if ($buildingTime) {
 				// do fast-forwarding
 				if ($buildingTime < $timeLeft) {
-					$metal += $metalProduct * $buildingTime;
+					$this->doProduce($resource, $product, $buildingTime);
 					$timeLeft -= $buildingTime;
 					$buildingTime = 0;
 				} else {
@@ -115,23 +186,20 @@ class StationManager extends Gene {
 
 			if ($buildingType) {
 				++$level[$buildingType];
-				$metalProduct = $this->calcMetalProduct($level);
+				$product = $this->calculateProduct($level);
 				$buildingType = null;
 			}
 
 			if (strlen($plan) != 0) {
 				//echo $_CONFIG['game.time'] - $timeLeft, ' :: Try building '. $plan[0], PHP_EOL;
-				$info = $this->tryBuild($plan[0], $metal, $level);
-
+				$info = $this->tryBuild($plan[0], $resource, $level);
 				if ($info['techLocked']) {
 					break;
 				}
-
-				if ($info['metalShortage']) {
-					// do fast-forwarding
-					$timeNeeded = floor($info['metalShortage'] / $metalProduct);
+				if (!empty($info['shortage'])) {
+					$timeNeeded = $this->calcTimeNeeded($info['shortage'], $product);
 					if ($timeNeeded < $timeLeft) {
-						$metal += $metalProduct * $timeNeeded;
+						$this->doProduce($resource, $product, $timeNeeded);
 						$timeLeft -= $timeNeeded;
 						$timeWaiting += $timeNeeded;
 					} else {
@@ -139,22 +207,91 @@ class StationManager extends Gene {
 					}
 				}
 
-				$metal -= $info['cost'];
+				foreach ($info['cost'] as $resType => $amount) {
+					$resource[$resType] -= $amount;
+				}
+
 				$buildingType = $info['type'];
 				$buildingTime = $info['buildingTime'];
 				$plan = substr($plan, 1);
 			}
 		}
 
-		$metal += $metalProduct * $timeLeft;
-		$this->info = compact('metal', 'level', 'buildingTime', 'buildingType', 'timeWaiting', 'metalProduct');
+		$this->doProduce($resource, $product, $timeLeft);
+
+		return compact('resource', 'product', 'level', 'buildingTime', 'buildingType', 'timeWaiting');
+	}
+
+	/**
+	 * @param array $resource
+	 * @param array $product
+	 * @param int $duration
+	 */
+	private function doProduce(&$resource, $product, $duration){
+
+		foreach ($product as $type => $val) {
+			$resource[$type] += $val * $duration;
+		}
+	}
+
+	/**
+	 * @param array $level
+	 * @return array
+	 */
+	private function calculateProduct($level){
+
+		static $map = [
+			'metal' => 'metalMine',
+			'crystal' => 'crystalMine',
+			'deuterium' => 'deuteriumSynthesizer',
+		];
+		if ($level['solar'] == 0) {
+			return $this->gameConfig['baseProduct'];
+		}
+
+		$energyConsume = 0;
+		$product = ['metal' => 0, 'crystal' => 0, 'deuterium' => 0];
+		foreach ($map as $resType => $buildingType) {
+			$energyConsume += call_user_func($this->gameConfig["building.$buildingType.consume"], $level[$buildingType]);
+			foreach (call_user_func($this->gameConfig["building.$buildingType.product"], $level[$buildingType]) as $t => $amount) {
+				$product[$t] += $amount;
+			}
+		}
+		$product['deuterium'] += call_user_func($this->gameConfig["building.nuclear.product"], $level['nuclear'])['deuterium'];
+
+		$energyProduct = call_user_func($this->gameConfig['building.solar.energy'], $level['solar']) +
+			call_user_func($this->gameConfig['building.nuclear.energy'], $level['nuclear']);
+
+		$produceRate = $energyConsume > $energyProduct ? $energyProduct / $energyConsume : 1;
+		array_walk($product, function(&$val, $resType) use ($produceRate){
+			$val *= $produceRate;
+			$val += $this->gameConfig['baseProduct'][$resType];
+		});
+		return $product;
 	}
 
 
-	private function tryBuild($type, $metal, $level){
+	/**
+	 * @param array $resourceNeed
+	 * @param array $product
+	 *
+	 * @return float|int
+	 */
+	private function calcTimeNeeded($resourceNeed, $product){
+
+		$durations = [];
+		foreach ($resourceNeed as $type => $val) {
+			if ($product[$type] <= 0) return PHP_INT_MAX;
+			$durations[] = $val / $product[$type];
+		}
+		return ceil(max($durations));
+	}
+
+
+	private function tryBuild($type, $resource, $level){
 		$type = self::$typeMap[$type];
 		$techLocked = false;
-		$cost = ceil(call_user_func(self::$gameConfig["building.$type.cost.metal"], $level[$type]+1));
+
 		if ($level[$type] == 0 && isset(self::$techTree[$type])) {
 			foreach (self::$techTree[$type] as $t => $lvl) {
 				if ($level[$t] < $lvl) {
@@ -164,89 +301,18 @@ class StationManager extends Gene {
 			}
 		}
 
-		return [
-			'type' => $type,
-			'techLocked' => $techLocked,
-			'cost' => $cost,
-			'metalShortage' => $cost > $metal ? $cost - $metal : 0,
-			'buildingTime' => ceil(pow(0.5, $level['nano']) * $cost / self::$gameConfig['buildRate'] / (1 + $level['robot'])),
-		];
-
-	}
-
-	private function calcMetalProduct($level){
-		$baseProduct = self::$gameConfig['baseMetalProduct'];
-
-		if ($level['metalMine'] * $level['solar'] == 0) return $baseProduct;
-
-		$product = call_user_func(self::$gameConfig['building.metalMine.product.metal'], $level['metalMine']);
-		$energyConsume = call_user_func(self::$gameConfig['building.metalMine.consume'], $level['metalMine']);
-		$energyProduct = call_user_func(self::$gameConfig['building.solar.product.energy'], $level['solar']);
-		if ($energyConsume > $energyProduct) {
-			return $baseProduct + $product * $energyProduct / $energyConsume;
-		}
-		return $baseProduct + $product;
-	}
-
-	public function getScore(){
-
-		$info = $this->info;
-
-		// 每消耗1000金币得1分
-		$cost = 0;
-		foreach (self::$typeMap as $type) {
-			$level = $info['level'][$type];
-			while ($level) {
-				$cost += call_user_func(self::$gameConfig["building.$type.cost.metal"], $level--);
+		$shortage = [];
+		$cost = call_user_func($this->gameConfig["building.$type.cost"], $level[$type]+1);
+		foreach ($cost as $resType => $amount) {
+			if ($resource[$resType] < $amount) {
+				$shortage[$resType] = $amount - $resource[$resType];
 			}
 		}
-		$consumeScore = $cost / 1000;
+		$buildingTime = ceil(pow(0.5, $level['nano'])) * array_sum($cost) / $this->gameConfig['buildRate'] / (1 + $level['robot']);
 
-		$remainMetal = $info['metal'];
-		// 尚有建造中的建筑,应该退还其消耗,并按剩余得分来计算
-		if ($info['buildingTime']) {
-			$type = $info['buildingType'];
-			$remainMetal += call_user_func(self::$gameConfig["building.$type.cost.metal"], $info['level'][$type] + 1);
-		}
-		$metalScore = pow($remainMetal, 1/3);
-
-		// 金币产量得分
-		$productScore = sqrt($info['metalProduct']);
-
-		$this->scoreDetail = [
-			'total' => floor($consumeScore + $productScore + $metalScore),
-			'metal' => $metalScore,
-			'consume' => $consumeScore,
-			'product' => $productScore,
-		];
-
-		return $this->scoreDetail['total'];
+		return compact('type', 'techLocked', 'cost', 'shortage', 'buildingTime');
 	}
 
-	public function selfEvaluate(){
 
-		$score = self::getCache($this->plan);
-		if ($score !== false) return $score;
 
-		$this->info = [];
-		$this->scoreDetail = [];
-
-		$this->simulate();
-		$score = $this->getScore();
-		if ($score == 0) {
-			print_r($this);
-			throw new UnexpectedValueException('Score is 0.');
-		}
-
-		if ($score > self::$_maxScore) {
-			self::$_maxScore = $score;
-			//recordPlan($g, $score, $plan, $info);
-			self::setCache($this->plan, $score);
-		}
-		return $score;
-	}
-
-	public function __toString(){
-		return substr_replace($this->plan, '...', 10, -3);
-	}
 }
